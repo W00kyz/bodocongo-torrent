@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"strings"
 )
 
 const (
@@ -14,6 +16,11 @@ const (
 
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
+	fmt.Println("Conexão recebida de ", conn.RemoteAddr().String())
+
+	fileHash, _ := bufio.NewReader(conn).ReadString('\n')
+	fileHash = strings.TrimSpace(fileHash)
+
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		fmt.Printf("Mensagem recebida: %s\n", scanner.Text())
@@ -23,13 +30,32 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
+// registerIP
+func registerIP(address string) {
+	file, err := os.OpenFile(PEERS_FILE, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		log.Fatal("PEERS_FILE não pôde ser aberto.")
+	}
+	defer file.Close()
+
+	_, err = file.WriteString(address + "\n")
+	if err != nil {
+		log.Fatal("erro ao escrever no arquivo: ", err)
+	}
+}
+
 func startServer(port int) {
-	ln, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+	selfAddress := GetLocalIP()
+	listenAddress := fmt.Sprintf("%s:%d", selfAddress, port)
+	ln, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer ln.Close()
-	fmt.Printf("Servidor ouvindo na porta %d\n", port)
+
+	registerIP(listenAddress)
+
+	fmt.Printf("Servidor está ouvindo no endereço %s\n", listenAddress)
 
 	for {
 		conn, err := ln.Accept()
@@ -42,8 +68,15 @@ func startServer(port int) {
 }
 
 func main() {
+
 	go startServer(PORT)
 
 	for {
+
 	}
+
+	// pegar os pares e o file_hash
+	// se houver pares, executa a busca com file_hash e imprime as máquinas encontradas.
+	// senão, não imprime nada pois não há pares.
+	//
 }
