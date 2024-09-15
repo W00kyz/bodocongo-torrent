@@ -6,114 +6,208 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 const (
-	PEERS_FILE = "peers.txt"
+	PEERS_FILE         = "peers.txt"
+	SHARED_FILES_FILE  = "shared-files.txt"
+	HASH_RECALCULATION = 30 * time.Minute
 )
 
-type conn struct {
-	ip   string
-	port string
-	conn net.Conn
+var mySharedFilesPathsHashMap map[int][]string
+var mutex sync.Mutex
+
+func startHashRecalculation(directories []string, interval time.Duration) {
+	go func() {
+		for {
+			time.Sleep(interval)
+
+			newHashMap := processDirectories(directories)
+
+			mutex.Lock()
+			mySharedFilesPathsHashMap = newHashMap
+			mutex.Unlock()
+
+			fmt.Println("Hashes recalculated and updated.")
+		}
+	}()
 }
 
-func handleConnection(conn net.Conn, peersCh chan net.Conn) {
-	fmt.Println("Conexão recebida de ", conn.RemoteAddr().String())
+func handleConnection(conn net.Conn) {
+	defer conn.Close()
+
+	fmt.Println("Connection received from ", conn.RemoteAddr().String())
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		msg := scanner.Text()
-		fmt.Printf("Mensagem recebida: %s\n", msg)
+		fmt.Printf("Message received: %s\n", msg)
 
-		response := "Recebido: " + msg
-		_, err := conn.Write([]byte(response + "\n"))
-		if err != nil {
-			log.Println("Erro ao enviar resposta:", err)
+		if strings.HasPrefix(msg, "SEARCH") {
+			parts := strings.Split(msg, " ")
+			hash, err := strconv.Atoi(parts[1])
+			if err == nil {
+				mutex.Lock()
+				_, exists := mySharedFilesPathsHashMap[hash]
+				mutex.Unlock()
+
+				if exists {
+					response := "FOUND"
+					_, err := conn.Write([]byte(response + "\n"))
+					if err != nil {
+						log.Println("Error while sending message:", err)
+					}
+				} else {
+					response := "NOT FOUND"
+					_, err := conn.Write([]byte(response + "\n"))
+					if err != nil {
+						log.Println("Error while sending message:", err)
+					}
+				}
+			}
+		} else {
+			response := "Response: " + msg
+			_, err := conn.Write([]byte(response + "\n"))
+			if err != nil {
+				log.Println("Error while sending response:", err)
+			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		log.Println("Erro na leitura:", err)
-	}
 
-	peersCh <- conn
+	if err := scanner.Err(); err != nil {
+		log.Println("Error while writing:", err)
+	}
 }
 
-func startServer(ip string, port string, peersCh chan net.Conn) {
+func startServer(ip, port string) {
 	selfAddress := ip + ":" + port
 	ln, err := net.Listen("tcp", selfAddress)
 	if err != nil {
-		connectToPeer(ip, port, peersCh)
-	} else {
-		defer ln.Close()
-
-		fmt.Printf("Servidor está ouvindo no endereço %s\n", selfAddress)
-
-		conn, err := ln.Accept()
-		if err != nil {
-			log.Println("Erro na aceitação de conexão:", err)
-			return
-		}
-		go handleConnection(conn, peersCh)
-	}
-}
-
-func connectToPeer(address string, port string, peersCh chan net.Conn) {
-	selfAddress := address + ":" + port
-	conn, err := net.Dial("tcp", selfAddress)
-	if err != nil {
-		log.Printf("Erro ao conectar ao peer %s: %v", address, err)
+		log.Fatalf("Error to load server for address %s: %v", selfAddress, err)
 		return
 	}
+	defer ln.Close()
 
-	fmt.Println("Conectado ao peer:", address)
+	fmt.Printf("Server listening from address %s\n", selfAddress)
 
-	peersCh <- conn
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			log.Println("Error to accept connection:", err)
+			continue
+		}
+		go handleConnection(conn)
+	}
 }
 
-func startAllConnections(peersCh chan net.Conn) {
-	file, err := os.Open(PEERS_FILE)
+func loadPeers(filePath string) ([]string, error) {
+	file, err := os.Open(filePath)
 	if err != nil {
-		log.Fatalf("Erro ao abrir o arquivo de peers: %v", err)
+		return nil, err
 	}
 	defer file.Close()
 
 	var peers []string
-
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		address := scanner.Text()
-		address = strings.TrimSpace(address)
+		address := strings.TrimSpace(scanner.Text())
 		if address != "" {
 			peers = append(peers, address)
 		}
 	}
+
 	if err := scanner.Err(); err != nil {
-		log.Fatalf("Erro ao ler o arquivo de peers: %v", err)
+		return nil, err
 	}
 
+	return peers, nil
+}
+
+func searchHashOnPeers(hash int, peers []string) {
+	var wg sync.WaitGroup
+	var positiveResponses []string
+	var mutex sync.Mutex
+
+	fmt.Printf("Hash asked: %d\n", hash)
+
+	for _, peer := range peers {
+		wg.Add(1)
+		go func(peer string) {
+			defer wg.Done()
+
+			conn, err := net.Dial("tcp", peer)
+			if err != nil {
+				log.Printf("Error connecting to peer %s: %v", peer, err)
+				return
+			}
+			defer conn.Close()
+
+			message := fmt.Sprintf("SEARCH %d\n", hash)
+			_, err = conn.Write([]byte(message))
+			if err != nil {
+				log.Printf("Error sending message to peer %s: %v", peer, err)
+				return
+			}
+
+			scanner := bufio.NewScanner(conn)
+			if scanner.Scan() {
+				response := scanner.Text()
+				if response == "FOUND" {
+					mutex.Lock()
+					positiveResponses = append(positiveResponses, peer)
+					mutex.Unlock()
+				}
+			}
+
+			if err := scanner.Err(); err != nil {
+				log.Printf("Error reading response from peer %s: %v", peer, err)
+			}
+		}(peer)
+	}
+
+	wg.Wait()
+
+	if len(positiveResponses) > 0 {
+		fmt.Printf("Positive response from: %s\n", strings.Join(positiveResponses, ", "))
+	} else {
+		fmt.Println("No peers found with the requested hash.")
+	}
+}
+
+func startAllConnections(peers []string) {
 	for _, peer := range peers {
 		parts := strings.Split(peer, ":")
 		ip := parts[0]
 		port := parts[1]
-		go startServer(ip, port, peersCh)
+		go startServer(ip, port)
 	}
-
-}
-
-func sendMessage(conn net.Conn, message string) {
-	_, err := conn.Write([]byte(message + "\n"))
-	if err != nil {
-		log.Printf("Erro ao enviar mensagem: %v", err)
-		return
-	}
-	fmt.Printf("Mensagem enviada para %s: %s\n", conn.RemoteAddr().String(), message)
 }
 
 func main() {
-	peersCh := make(chan net.Conn)
-	startAllConnections(peersCh)
-	a := <-peersCh
-	sendMessage(a, "oi")
+	mySharedFilesPathsHashMap = make(map[int][]string)
+
+	directories, err := loadDirectories(SHARED_FILES_FILE)
+	if err != nil {
+		log.Fatalf("Error to load directories: %v", err)
+	}
+
+	mySharedFilesPathsHashMap = processDirectories(directories)
+
+	startHashRecalculation(directories, HASH_RECALCULATION)
+
+	peers, err := loadPeers(PEERS_FILE)
+	if err != nil {
+		log.Fatalf("Error to load peers: %v", err)
+	}
+
+	startAllConnections(peers)
+
+	hash := 12345
+	searchHashOnPeers(hash, peers)
+
+	select {}
 }
