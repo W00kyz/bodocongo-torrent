@@ -235,8 +235,27 @@ func main() {
 
 	go startServer("localhost", "8080")
 
-	hash := 5035
-	searchHashOnPeers(hash, peers)
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		fmt.Print("Enter the hash you want to search (or 'exit' to finish): ")
+		if !scanner.Scan() {
+			break
+		}
+
+		input := strings.TrimSpace(scanner.Text())
+		if input == "exit" {
+			fmt.Println("Exiting program.")
+			break
+		}
+
+		hash, err := strconv.Atoi(input)
+		if err != nil {
+			fmt.Println("Invalid input, please input a number.")
+			continue
+		}
+
+		searchHashOnPeers(hash, peers)
+	}
 
 	select {}
 }
