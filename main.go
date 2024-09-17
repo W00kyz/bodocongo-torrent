@@ -234,7 +234,7 @@ func main() {
 		log.Fatalf("Error to load peers: %v", err)
 	}
 
-	go startServer("150.165.42.126", "8080")
+	go startServer(GetLocalIP(), "8080")
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
