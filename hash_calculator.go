@@ -74,19 +74,3 @@ func ProcessDirectory(dirPath string) (map[int][]string, error) {
 
 	return resultMap, nil
 }
-
-func main() {
-	dir := "./dataset"
-	result, err := ProcessDirectory(dir)
-	if err != nil {
-		fmt.Printf("Error processing directory: %v\n", err)
-		return
-	}
-
-	for hash, paths := range result {
-		fmt.Printf("Hash: %d\n", hash)
-		for _, path := range paths {
-			fmt.Printf("  - %s\n", path)
-		}
-	}
-}

@@ -83,6 +83,29 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
+func loadDirectories(filePath string) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var directories []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		dir := strings.TrimSpace(scanner.Text())
+		if dir != "" {
+			directories = append(directories, dir)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return directories, nil
+}
+
 func startServer(ip, port string) {
 	selfAddress := ip + ":" + port
 	ln, err := net.Listen("tcp", selfAddress)
@@ -185,6 +208,22 @@ func startAllConnections(peers []string) {
 		port := parts[1]
 		go startServer(ip, port)
 	}
+}
+
+func processDirectories(directories []string) map[int][]string {
+	resultMap := make(map[int][]string)
+	for _, dir := range directories {
+		dirHashes, err := ProcessDirectory(dir)
+		if err != nil {
+			log.Printf("Error processing directory %s: %v", dir, err)
+			continue
+		}
+
+		for hash, paths := range dirHashes {
+			resultMap[hash] = append(resultMap[hash], paths...)
+		}
+	}
+	return resultMap
 }
 
 func main() {
