@@ -56,7 +56,7 @@ func handleConnection(conn net.Conn) {
 				mutex.Unlock()
 
 				if exists {
-					response := "FOUND"
+					response := "FOUND|" + GetHostname() + "|"
 					_, err := conn.Write([]byte(response + "\n"))
 					if err != nil {
 						log.Println("Error while sending message:", err)
@@ -179,9 +179,10 @@ func searchHashOnPeers(hash int, peers []string) {
 			scanner := bufio.NewScanner(conn)
 			if scanner.Scan() {
 				response := scanner.Text()
-				if response == "FOUND" {
+				parts := strings.Split(response, "|")
+				if parts[0] == "FOUND" {
 					mutex.Lock()
-					positiveResponses = append(positiveResponses, peer)
+					positiveResponses = append(positiveResponses, parts[1])
 					mutex.Unlock()
 				}
 			}
@@ -233,7 +234,7 @@ func main() {
 		log.Fatalf("Error to load peers: %v", err)
 	}
 
-	go startServer("localhost", "8080")
+	go startServer("150.165.42.126", "8080")
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
