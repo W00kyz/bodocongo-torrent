@@ -1,5 +1,1 @@
-localhost:7567
-localhost:7568
-localhost:7569
-localhost:7561
-localhost:7562
+localhost:8081

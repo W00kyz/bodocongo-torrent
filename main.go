@@ -201,15 +201,6 @@ func searchHashOnPeers(hash int, peers []string) {
 	}
 }
 
-func startAllConnections(peers []string) {
-	for _, peer := range peers {
-		parts := strings.Split(peer, ":")
-		ip := parts[0]
-		port := parts[1]
-		go startServer(ip, port)
-	}
-}
-
 func processDirectories(directories []string) map[int][]string {
 	resultMap := make(map[int][]string)
 	for _, dir := range directories {
@@ -235,7 +226,6 @@ func main() {
 	}
 
 	mySharedFilesPathsHashMap = processDirectories(directories)
-
 	startHashRecalculation(directories, HASH_RECALCULATION)
 
 	peers, err := loadPeers(PEERS_FILE)
@@ -243,9 +233,9 @@ func main() {
 		log.Fatalf("Error to load peers: %v", err)
 	}
 
-	startAllConnections(peers)
+	go startServer("localhost", "8080")
 
-	hash := 12345
+	hash := 5035
 	searchHashOnPeers(hash, peers)
 
 	select {}
